@@ -71,6 +71,24 @@ If the host refreshes or loses connection, the room waits up to `HOST_GRACE_SECO
 - **Proxy** - the page is fetched by the server, frame-blocking headers are stripped, and a sync agent is injected. Best for plain HTML5 video pages. Same-origin, so scroll and video state are read directly.
 - **Direct** - the URL is loaded in a plain iframe. Only the URL is synced; use it for sites that allow embedding but break under the proxy.
 
+### Share tab (for sites that block the proxy)
+
+Some sites cannot be proxied: proof-of-work challenges (Cloudflare, DDoS-Guard,
+Anubis) bind cookies and JavaScript to the target origin, and single-page apps
+keep per-browser state, so each viewer's iframe ends up on its own version of
+the page.
+
+For those, use **Share tab**:
+
+1. Open the site directly in another browser tab and get to the video.
+2. In WeiWatch, click **Share tab** and pick that tab.
+3. Viewers watch your actual tab over WebRTC. The host's browser solves any
+   challenge naturally, and everyone sees the same page and player.
+
+The server only relays WebRTC signaling; the video/audio stream goes
+peer-to-peer. Desktop Chrome, Edge and Firefox support tab sharing. A TURN
+server may be needed if viewers are behind restrictive NATs.
+
 ## How the sync works
 
 The server keeps a small in-memory room state and relays events between sockets. It never renders pages or decodes video.
@@ -79,6 +97,7 @@ The server keeps a small in-memory room state and relays events between sockets.
 - A heartbeat every 3 seconds carries the current URL, playback time, paused state, rate and scroll position. Viewers correct drift above ~1.5 seconds.
 - Late joiners receive the current room state and apply it once their player is ready.
 - The proxy injects `/sync-agent.js`, which intercepts link clicks and `pushState`, and reports `<video>`/`<audio>` events to the parent app.
+- **Share tab** bypasses the proxy entirely: the host captures a real browser tab with `getDisplayMedia` and sends it to viewers over WebRTC.
 
 ## Deploying under a subpath (nginx)
 
@@ -139,7 +158,7 @@ public/
 
 ## Limitations
 
-- DRM video (Netflix, Disney+, etc.) will not work in an iframe or through the proxy.
+- DRM video (Netflix, Disney+, etc.) will not work in an iframe or through the proxy; use **Share tab** instead.
 - Sites that rely heavily on same-origin `fetch`/XHR may break in proxy mode; try direct mode.
 - The proxy does not forward cookies or POST bodies.
 - Rooms are in memory; restarting the server ends active rooms.

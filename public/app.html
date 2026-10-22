@@ -105,6 +105,22 @@
                   <option value="direct">Direct</option>
                 </select>
               </div>
+
+              <button
+                class="btn btn-ghost btn-sm share-btn"
+                id="share-tab"
+                type="button"
+                hidden
+                title="Share a browser tab with the room"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="4" width="20" height="13" rx="2" />
+                  <path d="M8 21h8" />
+                  <path d="M12 17v4" />
+                  <path d="M10 8.5v4l3.5-2-3.5-2z" />
+                </svg>
+                <span id="share-tab-label">Share tab</span>
+              </button>
             </div>
 
             <div class="browser-viewport" id="viewport">
@@ -118,6 +134,27 @@
 
               <div class="yt-wrap" id="yt-wrap" hidden>
                 <div id="yt-player"></div>
+              </div>
+
+              <video
+                id="share-video"
+                class="share-video"
+                autoplay
+                playsinline
+                controls
+                hidden
+              ></video>
+
+              <div class="share-placeholder" id="share-placeholder" hidden>
+                <div class="empty-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="4" width="20" height="13" rx="2" />
+                    <path d="M8 21h8" />
+                    <path d="M12 17v4" />
+                  </svg>
+                </div>
+                <h3>Live tab share</h3>
+                <p>The host is sharing a tab. The stream will appear here.</p>
               </div>
 
               <div class="empty-state" id="empty-state">

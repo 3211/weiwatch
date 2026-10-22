@@ -23,6 +23,15 @@
     lastSentScroll: -1,
     lastSentTitle: '',
     joined: false,
+    sharing: false,
+    shareStarting: false,
+    localStream: null,
+    peers: new Map(),
+    pendingIce: new Map(),
+    remoteSharing: false,
+    remotePeer: null,
+    remoteHostId: null,
+    pendingRemoteIce: [],
   };
 
   const el = {};
@@ -51,6 +60,10 @@
       frame: 'frame',
       ytWrap: 'yt-wrap',
       ytPlayer: 'yt-player',
+      shareTab: 'share-tab',
+      shareTabLabel: 'share-tab-label',
+      shareVideo: 'share-video',
+      sharePlaceholder: 'share-placeholder',
       emptyState: 'empty-state',
       frameLoading: 'frame-loading',
       autoplayHint: 'autoplay-hint',
@@ -286,7 +299,7 @@
   }
 
   function applyYt(command) {
-    if (!command) return;
+    if (!command || state.remoteSharing) return;
     if (!ytPlayer || !ytReady) {
       state.pendingVideo = command;
       scheduleVideoRetry();
@@ -350,12 +363,21 @@
 
   function updateNavButtons() {
     const isHost = state.role === 'host';
-    el.back.disabled = !isHost || state.historyIndex <= 0;
-    el.forward.disabled = !isHost || state.historyIndex >= state.history.length - 1;
+    el.back.disabled = !isHost || state.sharing || state.historyIndex <= 0;
+    el.forward.disabled =
+      !isHost || state.sharing || state.historyIndex >= state.history.length - 1;
   }
 
   function updateSyncNote() {
     if (!state.role) return;
+    if (state.remoteSharing) {
+      el.syncNote.textContent = 'Live tab share';
+      return;
+    }
+    if (state.sharing) {
+      el.syncNote.textContent = 'Sharing a tab live';
+      return;
+    }
     const resolved = resolveMode(state.url);
     if (state.role === 'host') {
       el.syncNote.textContent =
@@ -390,6 +412,7 @@
   }
 
   function loadContent(url) {
+    if (state.sharing || state.remoteSharing) return;
     state.url = url;
     const resolved = resolveMode(url);
     el.emptyState.hidden = true;
@@ -477,7 +500,7 @@
   }
 
   function applyVideo(command) {
-    if (!command) return;
+    if (!command || state.remoteSharing) return;
     const doc = getFrameDoc();
     const media = doc ? doc.querySelector('video,audio') : null;
     if (!media) {
@@ -529,6 +552,408 @@
     }, 500);
   }
 
+  // ------------------------------------------------------- tab sharing -----
+
+  function pauseLocalPlayback() {
+    const doc = getFrameDoc();
+    if (doc) {
+      const media = doc.querySelector('video,audio');
+      if (media) {
+        try {
+          media.pause();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (ytPlayer && ytReady) {
+      try {
+        ytPlayer.pauseVideo();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function showShareVideo(stream, muted) {
+    pauseLocalPlayback();
+    el.shareVideo.srcObject = stream;
+    el.shareVideo.muted = muted;
+    el.shareVideo.hidden = false;
+    el.sharePlaceholder.hidden = true;
+    el.frame.hidden = true;
+    el.ytWrap.hidden = true;
+    el.emptyState.hidden = true;
+    el.frameLoading.hidden = true;
+    const promise = el.shareVideo.play();
+    if (promise && typeof promise.catch === 'function') {
+      promise.catch(() => {
+        if (!muted) showAutoplayHint();
+      });
+    }
+  }
+
+  function hideShareVideo() {
+    try {
+      el.shareVideo.pause();
+    } catch {
+      /* ignore */
+    }
+    el.shareVideo.srcObject = null;
+    el.shareVideo.hidden = true;
+  }
+
+  function showSharePlaceholder() {
+    pauseLocalPlayback();
+    el.sharePlaceholder.hidden = false;
+    el.frame.hidden = true;
+    el.ytWrap.hidden = true;
+    el.emptyState.hidden = true;
+    el.frameLoading.hidden = true;
+  }
+
+  function hideSharePlaceholder() {
+    el.sharePlaceholder.hidden = true;
+  }
+
+  function closeRemotePeer() {
+    if (state.remotePeer) {
+      try {
+        state.remotePeer.close();
+      } catch {
+        /* ignore */
+      }
+      state.remotePeer = null;
+    }
+    state.remoteHostId = null;
+    state.pendingRemoteIce = [];
+    hideShareVideo();
+  }
+
+  function resetShare() {
+    if (state.sharing) {
+      state.sharing = false;
+      state.socket?.emit('share:stop');
+    }
+    for (const peer of state.peers.values()) {
+      try {
+        peer.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    state.peers.clear();
+    state.pendingIce.clear();
+    if (state.localStream) {
+      for (const track of state.localStream.getTracks()) {
+        try {
+          track.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+      state.localStream = null;
+    }
+    hideShareVideo();
+    hideSharePlaceholder();
+    closeRemotePeer();
+    state.remoteSharing = false;
+  }
+
+  function updateShareUi() {
+    const isHost = state.role === 'host';
+    el.shareTab.hidden = !isHost;
+    el.shareTabLabel.textContent = state.sharing ? 'Stop sharing' : 'Share tab';
+    el.shareTab.classList.toggle('btn-danger', state.sharing);
+    el.shareTab.setAttribute('aria-pressed', state.sharing ? 'true' : 'false');
+    el.urlInput.disabled = !isHost || state.sharing;
+    el.go.disabled = !isHost || state.sharing;
+    el.modeSelect.disabled = state.sharing;
+    el.reload.disabled = state.sharing;
+    updateNavButtons();
+
+    if (state.sharing) {
+      el.pageTitle.textContent = 'Live tab share';
+    }
+
+    if (state.remoteSharing) {
+      el.viewerBadge.hidden = false;
+      el.viewerBadge.textContent = 'Live tab share';
+      el.syncNote.textContent = 'Live tab share';
+      el.pageTitle.textContent = 'Live tab share';
+      return;
+    }
+
+    el.viewerBadge.hidden = isHost;
+    el.viewerBadge.textContent = 'Host is driving';
+    updateSyncNote();
+  }
+
+  function createPeer(viewerId) {
+    if (!state.sharing || !state.localStream || !viewerId) return;
+    if (state.peers.has(viewerId)) return;
+
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+    state.peers.set(viewerId, peer);
+    state.pendingIce.set(viewerId, []);
+
+    for (const track of state.localStream.getTracks()) {
+      peer.addTrack(track, state.localStream);
+    }
+
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        state.socket.emit('webrtc:ice', { to: viewerId, candidate: event.candidate });
+      }
+    };
+
+    peer.onconnectionstatechange = () => {
+      if (peer.connectionState === 'failed') {
+        try {
+          peer.close();
+        } catch {
+          /* ignore */
+        }
+        state.peers.delete(viewerId);
+        state.pendingIce.delete(viewerId);
+        if (state.sharing) {
+          setTimeout(() => {
+            if (state.sharing && state.members.some((member) => member.id === viewerId)) {
+              createPeer(viewerId);
+            }
+          }, 1500);
+        }
+      }
+    };
+
+    peer
+      .createOffer()
+      .then((offer) => peer.setLocalDescription(offer))
+      .then(() => {
+        state.socket.emit('webrtc:offer', { to: viewerId, sdp: peer.localDescription });
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }
+
+  function syncPeers() {
+    if (!state.sharing) return;
+    const viewerIds = new Set(
+      state.members
+        .filter((member) => member.role === 'viewer' && member.id)
+        .map((member) => member.id)
+    );
+    for (const id of viewerIds) {
+      if (!state.peers.has(id)) createPeer(id);
+    }
+    for (const id of [...state.peers.keys()]) {
+      if (!viewerIds.has(id)) {
+        const peer = state.peers.get(id);
+        try {
+          peer.close();
+        } catch {
+          /* ignore */
+        }
+        state.peers.delete(id);
+        state.pendingIce.delete(id);
+      }
+    }
+  }
+
+  async function startShare() {
+    if (state.role !== 'host' || state.sharing || state.shareStarting) return;
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      toast('Tab sharing is not supported in this browser.');
+      return;
+    }
+
+    state.shareStarting = true;
+    el.shareTab.disabled = true;
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: true,
+      });
+    } catch {
+      state.shareStarting = false;
+      el.shareTab.disabled = false;
+      return;
+    }
+
+    state.shareStarting = false;
+    el.shareTab.disabled = false;
+    state.localStream = stream;
+    state.sharing = true;
+    state.socket.emit('share:start');
+
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.contentHint = 'motion';
+      videoTrack.addEventListener('ended', () => stopShare());
+    }
+
+    showShareVideo(stream, true);
+    updateShareUi();
+    syncPeers();
+    toast('Sharing your tab. Pick the tab with the site you want to watch.');
+  }
+
+  function stopShare() {
+    if (!state.sharing) return;
+    state.sharing = false;
+    state.socket.emit('share:stop');
+
+    for (const peer of state.peers.values()) {
+      try {
+        peer.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    state.peers.clear();
+    state.pendingIce.clear();
+
+    if (state.localStream) {
+      for (const track of state.localStream.getTracks()) {
+        try {
+          track.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+      state.localStream = null;
+    }
+
+    hideShareVideo();
+    updateShareUi();
+    if (state.url) loadContent(state.url);
+    else showEmptyState(true);
+  }
+
+  async function handleShareAnswer(payload) {
+    if (state.role !== 'host' || !payload?.from || !payload.sdp) return;
+    const peer = state.peers.get(payload.from);
+    if (!peer) return;
+    try {
+      await peer.setRemoteDescription(payload.sdp);
+      const queue = state.pendingIce.get(payload.from) || [];
+      for (const candidate of queue) {
+        try {
+          await peer.addIceCandidate(candidate);
+        } catch {
+          /* ignore */
+        }
+      }
+      state.pendingIce.set(payload.from, []);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function handleShareIce(payload) {
+    if (!payload?.candidate) return;
+
+    if (state.role === 'host') {
+      const peer = state.peers.get(payload.from);
+      if (!peer) return;
+      if (!peer.remoteDescription) {
+        const queue = state.pendingIce.get(payload.from) || [];
+        queue.push(payload.candidate);
+        state.pendingIce.set(payload.from, queue);
+        return;
+      }
+      try {
+        await peer.addIceCandidate(payload.candidate);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    const peer = state.remotePeer;
+    if (!peer) return;
+    if (!peer.remoteDescription) {
+      state.pendingRemoteIce.push(payload.candidate);
+      return;
+    }
+    try {
+      await peer.addIceCandidate(payload.candidate);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function handleShareOffer(payload) {
+    if (state.role === 'host' || !payload?.sdp) return;
+    state.remoteSharing = true;
+    closeRemotePeer();
+
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+    state.remotePeer = peer;
+    state.remoteHostId = payload.from || null;
+    state.pendingRemoteIce = [];
+
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        state.socket.emit('webrtc:ice', { candidate: event.candidate });
+      }
+    };
+
+    peer.ontrack = (event) => {
+      const stream = event.streams[0] || new MediaStream([event.track]);
+      showShareVideo(stream, false);
+    };
+
+    peer.onconnectionstatechange = () => {
+      if (['failed', 'closed'].includes(peer.connectionState) && state.remoteSharing) {
+        showSharePlaceholder();
+      }
+    };
+
+    try {
+      await peer.setRemoteDescription(payload.sdp);
+      for (const candidate of state.pendingRemoteIce) {
+        try {
+          await peer.addIceCandidate(candidate);
+        } catch {
+          /* ignore */
+        }
+      }
+      state.pendingRemoteIce = [];
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      state.socket.emit('webrtc:answer', { sdp: peer.localDescription });
+    } catch {
+      toast('Could not connect to the host stream.');
+    }
+
+    updateShareUi();
+  }
+
+  function onShareStarted() {
+    if (state.role === 'host') return;
+    state.remoteSharing = true;
+    showSharePlaceholder();
+    updateShareUi();
+  }
+
+  function onShareStopped() {
+    if (state.role === 'host') return;
+    state.remoteSharing = false;
+    closeRemotePeer();
+    hideSharePlaceholder();
+    updateShareUi();
+    if (state.url) loadContent(state.url);
+    else showEmptyState(false);
+  }
+
   // ------------------------------------------------------- host sync loop ---
 
   function startHostLoops() {
@@ -545,7 +970,7 @@
   }
 
   function hostTick() {
-    if (state.role !== 'host' || !state.url) return;
+    if (state.role !== 'host' || !state.url || state.sharing) return;
     if (resolveMode(state.url) === 'youtube') return;
     const doc = getFrameDoc();
     if (!doc) return;
@@ -565,7 +990,7 @@
   }
 
   function hostHeartbeat() {
-    if (state.role !== 'host' || !state.url) return;
+    if (state.role !== 'host' || !state.url || state.sharing) return;
     const resolved = resolveMode(state.url);
     let video = state.lastVideo;
     let scrollY = 0;
@@ -607,7 +1032,7 @@
   // ------------------------------------------------------ remote handlers ---
 
   function onRemoteNavigate(payload) {
-    if (state.role === 'host') return;
+    if (state.role === 'host' || state.remoteSharing) return;
     if (payload?.mode && MODES.has(payload.mode)) {
       state.mode = payload.mode;
       el.modeSelect.value = payload.mode;
@@ -619,7 +1044,7 @@
   }
 
   function onRemoteState(payload) {
-    if (state.role === 'host') return;
+    if (state.role === 'host' || state.remoteSharing) return;
     if (typeof payload?.title === 'string' && payload.title) {
       state.title = payload.title;
       el.pageTitle.textContent = payload.title;
@@ -633,7 +1058,7 @@
   }
 
   function onRemoteVideo(command) {
-    if (state.role === 'host' || !command) return;
+    if (state.role === 'host' || state.remoteSharing || !command) return;
     state.lastVideo = {
       time: command.time,
       paused: command.paused,
@@ -644,7 +1069,7 @@
   }
 
   function onRemoteHeartbeat(heartbeat) {
-    if (state.role === 'host' || !heartbeat) return;
+    if (state.role === 'host' || state.remoteSharing || !heartbeat) return;
 
     if (heartbeat.url && heartbeat.url !== state.url) {
       state.url = heartbeat.url;
@@ -701,7 +1126,7 @@
   function onAgentMessage(event) {
     const data = event.data;
     if (!data || data.source !== 'weiwatch-agent') return;
-    if (state.role !== 'host') return;
+    if (state.role !== 'host' || state.sharing) return;
 
     if (data.type === 'navigate') {
       const url = normalizeUrl(data.url);
@@ -814,6 +1239,8 @@
 
       el.members.appendChild(item);
     }
+
+    syncPeers();
   }
 
   // --------------------------------------------------------------- rooms ----
@@ -844,6 +1271,10 @@
     el.go.disabled = !isHost;
     el.modeGroup.hidden = !isHost;
     el.viewerBadge.hidden = isHost;
+    el.shareTab.hidden = !isHost;
+
+    resetShare();
+    state.remoteSharing = Boolean(response.state?.share);
 
     document.title = `Room ${response.code} - WeiWatch`;
     window.history.replaceState(null, '', `?room=${response.code}`);
@@ -857,7 +1288,9 @@
       else showEmptyState(true);
     } else {
       stopHostLoops();
-      if (state.url) {
+      if (state.remoteSharing) {
+        showSharePlaceholder();
+      } else if (state.url) {
         state.pendingVideo = state.lastVideo;
         loadContent(state.url);
       } else {
@@ -866,8 +1299,7 @@
     }
 
     updateUrlBar();
-    updateNavButtons();
-    updateSyncNote();
+    updateShareUi();
     el.chatInput.focus();
   }
 
@@ -909,15 +1341,21 @@
         el.go.disabled = !isHost;
         el.modeGroup.hidden = !isHost;
         el.viewerBadge.hidden = isHost;
+        el.shareTab.hidden = !isHost;
+
+        resetShare();
+        state.remoteSharing = Boolean(response.state?.share);
+
         renderMembers(response.members || []);
         if (isHost) startHostLoops();
         else stopHostLoops();
-        if (response.state?.url && response.state.url !== state.url) {
+        if (state.remoteSharing) {
+          showSharePlaceholder();
+        } else if (response.state?.url && response.state.url !== state.url) {
           state.url = response.state.url;
           loadContent(state.url);
         }
-        updateNavButtons();
-        updateSyncNote();
+        updateShareUi();
       }
     );
   }
@@ -991,6 +1429,11 @@
       updateSyncNote();
     });
 
+    el.shareTab.addEventListener('click', () => {
+      if (state.sharing) stopShare();
+      else startShare();
+    });
+
     el.copyLink.addEventListener('click', async () => {
       const link = new URL(`app?room=${state.room}`, window.location.href).toString();
       try {
@@ -1002,6 +1445,7 @@
     });
 
     el.logout.addEventListener('click', async () => {
+      stopShare();
       try {
         state.socket?.emit('room:leave');
       } catch {
@@ -1017,6 +1461,10 @@
 
     el.autoplayHint.addEventListener('click', () => {
       el.autoplayHint.hidden = true;
+      if (state.remoteSharing && el.shareVideo.srcObject) {
+        el.shareVideo.play().catch(() => {});
+        return;
+      }
       if (resolveMode(state.url) === 'youtube' && ytPlayer && ytReady) {
         try {
           ytPlayer.playVideo();
@@ -1083,6 +1531,7 @@
     });
 
     socket.on('room:closed', ({ reason }) => {
+      closeRemotePeer();
       appendMessage({
         type: 'system',
         text: `Room closed: ${reason || 'the host left'}`,
@@ -1098,6 +1547,11 @@
     socket.on('browser:state', onRemoteState);
     socket.on('video:cmd', onRemoteVideo);
     socket.on('video:heartbeat', onRemoteHeartbeat);
+    socket.on('share:started', onShareStarted);
+    socket.on('share:stopped', onShareStopped);
+    socket.on('webrtc:offer', handleShareOffer);
+    socket.on('webrtc:answer', handleShareAnswer);
+    socket.on('webrtc:ice', handleShareIce);
   }
 
   async function init() {

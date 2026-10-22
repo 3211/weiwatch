@@ -60,6 +60,7 @@ export class RoomManager {
         title: '',
         scrollY: 0,
         video: { time: 0, paused: true, rate: 1 },
+        share: false,
         updatedAt: Date.now(),
       },
       messages: [],

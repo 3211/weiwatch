@@ -241,7 +241,12 @@ io.on('connection', (socket) => {
 
     const room = rooms.create({ username: user.u, displayName: user.n });
     room.host.socketId = socket.id;
-    room.members.set(socket.id, { username: user.u, displayName: user.n, role: 'host' });
+    room.members.set(socket.id, {
+      id: socket.id,
+      username: user.u,
+      displayName: user.n,
+      role: 'host',
+    });
     socket.join(roomChannel(room.code));
     socket.data.roomCode = room.code;
     socket.data.role = 'host';
@@ -292,6 +297,7 @@ io.on('connection', (socket) => {
     socket.join(roomChannel(room.code));
     socket.data.roomCode = room.code;
     room.members.set(socket.id, {
+      id: socket.id,
       username: user.u,
       displayName: user.n,
       role: socket.data.role,
@@ -403,6 +409,51 @@ io.on('connection', (socket) => {
     ack?.({ ok: true, state: room.state });
   });
 
+  // --- live tab sharing (WebRTC signaling only) ----------------------------
+  socket.on('share:start', () => {
+    const room = getRoom(socket);
+    if (!isHost(socket, room)) return;
+    room.state.share = true;
+    socket.to(roomChannel(room.code)).emit('share:started', { hostId: socket.id });
+  });
+
+  socket.on('share:stop', () => {
+    const room = getRoom(socket);
+    if (!isHost(socket, room)) return;
+    room.state.share = false;
+    socket.to(roomChannel(room.code)).emit('share:stopped');
+  });
+
+  socket.on('webrtc:offer', (payload) => {
+    const room = getRoom(socket);
+    if (!isHost(socket, room)) return;
+    const target = io.sockets.sockets.get(String(payload?.to || ''));
+    if (!target || target.data.roomCode !== room.code) return;
+    target.emit('webrtc:offer', { from: socket.id, sdp: payload?.sdp });
+  });
+
+  socket.on('webrtc:answer', (payload) => {
+    const room = getRoom(socket);
+    if (!room || socket.data.role !== 'viewer') return;
+    const host = io.sockets.sockets.get(room.host.socketId);
+    if (!host) return;
+    host.emit('webrtc:answer', { from: socket.id, sdp: payload?.sdp });
+  });
+
+  socket.on('webrtc:ice', (payload) => {
+    const room = getRoom(socket);
+    if (!room) return;
+    if (socket.data.role === 'host') {
+      const target = io.sockets.sockets.get(String(payload?.to || ''));
+      if (!target || target.data.roomCode !== room.code) return;
+      target.emit('webrtc:ice', { from: socket.id, candidate: payload?.candidate });
+      return;
+    }
+    const host = io.sockets.sockets.get(room.host.socketId);
+    if (!host) return;
+    host.emit('webrtc:ice', { from: socket.id, candidate: payload?.candidate });
+  });
+
   socket.on('disconnect', () => {
     chatBuckets.delete(socket.id);
     leaveRoom(socket, false);
@@ -423,6 +474,10 @@ function leaveRoom(socket, notify) {
   room.lastActivity = Date.now();
 
   if (wasHost) {
+    if (room.state.share) {
+      room.state.share = false;
+      io.to(roomChannel(room.code)).emit('share:stopped');
+    }
     room.host.socketId = null;
     io.to(roomChannel(room.code)).emit('room:host-away', { graceMs: config.hostGraceMs });
     if (room.hostTimer) clearTimeout(room.hostTimer);
