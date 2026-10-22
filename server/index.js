@@ -142,7 +142,11 @@ app.use(
     index: false,
     maxAge: '1h',
     setHeaders(res, filePath) {
-      if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-store');
+      } else if (filePath.endsWith('sync-agent.js') || filePath.endsWith('js/app.js')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
     },
   })
 );

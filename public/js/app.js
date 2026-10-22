@@ -158,6 +158,7 @@
 
   function showLobby(error) {
     state.joined = false;
+    stopHostLoops();
     el.app.hidden = true;
     el.lobby.hidden = false;
     el.roomChip.hidden = true;
