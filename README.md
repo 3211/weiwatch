@@ -80,6 +80,20 @@ The server keeps a small in-memory room state and relays events between sockets.
 - Late joiners receive the current room state and apply it once their player is ready.
 - The proxy injects `/sync-agent.js`, which intercepts link clicks and `pushState`, and reports `<video>`/`<audio>` events to the parent app.
 
+## Deploying under a subpath (nginx)
+
+The app uses relative asset/API paths and derives its Socket.IO path from the
+current URL, so it can be mounted under a prefix such as `/weiwatch` without a
+rebuild. Add the block from [`deploy/nginx-weiwatch.conf`](deploy/nginx-weiwatch.conf)
+inside the HTTPS server block, then reload nginx:
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
+When serving over HTTPS behind nginx, set `COOKIE_SECURE=true` and
+`TRUST_PROXY=true` in `.env` and recreate the container.
+
 ## Security notes
 
 - The proxy is **authenticated** and blocks private/loopback/link-local addresses (including redirect hops) to reduce SSRF risk.
@@ -106,6 +120,8 @@ npm run hash -- "correct horse battery staple"
 ## Project layout
 
 ```
+deploy/
+  nginx-weiwatch.conf  sample nginx location block for a subpath deployment
 server/
   index.js          Express + Socket.IO, auth routes, room relay
   auth.js           credentials.json loading, scrypt, signed cookies

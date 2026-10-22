@@ -1,10 +1,18 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { Readable } from 'node:stream';
-import { config } from './config.js';
+import { config, ROOT } from './config.js';
 
 export const proxyRouter = express.Router();
+
+// Inline the agent so proxied pages work no matter which path prefix the app
+// is mounted under (for example /weiwatch behind nginx).
+const AGENT_SOURCE = fs
+  .readFileSync(path.join(ROOT, 'public', 'sync-agent.js'), 'utf8')
+  .replace(/<\/script/gi, '<\\/script');
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
@@ -111,7 +119,7 @@ function injectAgent(html, baseUrl) {
     out = `${headInjection}${out}`;
   }
 
-  const agentTag = '<script src="/sync-agent.js" data-weiwatch="1"></script>';
+  const agentTag = `<script data-weiwatch="1">${AGENT_SOURCE}</script>`;
   if (/<\/body\s*>/i.test(out)) {
     out = out.replace(/<\/body\s*>/i, `${agentTag}</body>`);
   } else {

@@ -78,16 +78,16 @@ app.get('/healthz', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  if (getSession(req)) return res.redirect('/app');
+  if (getSession(req)) return res.redirect('app');
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
 app.get('/app', (req, res) => {
-  if (!getSession(req)) return res.redirect('/');
+  if (!getSession(req)) return res.redirect('./');
   res.sendFile(path.join(PUBLIC_DIR, 'app.html'));
 });
 
-app.get('/app.html', (req, res) => res.redirect('/app'));
+app.get('/app.html', (req, res) => res.redirect('app'));
 
 // --- auth API ---------------------------------------------------------------
 app.post('/api/login', (req, res) => {

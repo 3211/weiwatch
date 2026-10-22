@@ -32,7 +32,7 @@
     button.textContent = 'Signing in...';
 
     try {
-      const response = await fetch('/api/login', {
+      const response = await fetch('api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -47,7 +47,7 @@
         return;
       }
 
-      window.location.href = '/app';
+      window.location.href = 'app';
     } catch {
       showError('Network error. Try again.');
     } finally {

@@ -118,6 +118,13 @@
     return detectYouTube(url) ? 'youtube' : 'proxy';
   }
 
+  function basePath() {
+    const path = window.location.pathname;
+    if (path.endsWith('/app')) return path.slice(0, -4);
+    if (path.endsWith('/')) return path.slice(0, -1);
+    return '';
+  }
+
   function initials(name) {
     return (
       String(name || '?')
@@ -414,7 +421,7 @@
       } catch {
         /* ignore */
       }
-      const src = resolved === 'proxy' ? `/proxy?url=${encodeURIComponent(url)}` : url;
+      const src = resolved === 'proxy' ? `proxy?url=${encodeURIComponent(url)}` : url;
       el.frame.src = src;
     }
 
@@ -985,7 +992,7 @@
     });
 
     el.copyLink.addEventListener('click', async () => {
-      const link = `${window.location.origin}/app?room=${state.room}`;
+      const link = new URL(`app?room=${state.room}`, window.location.href).toString();
       try {
         await navigator.clipboard.writeText(link);
         toast('Invite link copied');
@@ -1001,11 +1008,11 @@
         /* ignore */
       }
       try {
-        await fetch('/api/logout', { method: 'POST' });
+        await fetch('api/logout', { method: 'POST' });
       } catch {
         /* ignore */
       }
-      window.location.replace('/');
+      window.location.replace('./');
     });
 
     el.autoplayHint.addEventListener('click', () => {
@@ -1040,7 +1047,7 @@
   }
 
   function connect() {
-    const socket = io({ withCredentials: true });
+    const socket = io({ withCredentials: true, path: `${basePath()}/socket.io` });
     state.socket = socket;
 
     socket.on('connect', () => {
@@ -1054,7 +1061,7 @@
 
     socket.on('connect_error', (error) => {
       if (String(error?.message || '').includes('unauthorized')) {
-        window.location.replace('/');
+        window.location.replace('./');
         return;
       }
       setStatus('offline');
@@ -1083,7 +1090,7 @@
       });
       toast('Room closed');
       setTimeout(() => {
-        window.location.href = '/app';
+        window.location.href = 'app';
       }, 1600);
     });
 
@@ -1098,14 +1105,14 @@
     bindUi();
 
     try {
-      const response = await fetch('/api/me', { credentials: 'same-origin' });
+      const response = await fetch('api/me', { credentials: 'same-origin' });
       if (!response.ok) {
-        window.location.replace('/');
+        window.location.replace('./');
         return;
       }
       state.me = await response.json();
     } catch {
-      window.location.replace('/');
+      window.location.replace('./');
       return;
     }
 
