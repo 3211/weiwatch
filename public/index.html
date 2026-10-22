@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in - WeiWatch</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body class="auth-body">
+    <div class="auth-glow" aria-hidden="true"></div>
+    <main class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-mark brand-mark-lg" aria-hidden="true">
+          <svg viewBox="0 0 32 32">
+            <defs>
+              <linearGradient id="brandGradient" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#6d8bff" />
+                <stop offset="1" stop-color="#a06bff" />
+              </linearGradient>
+            </defs>
+            <rect x="1" y="1" width="30" height="30" rx="9" fill="url(#brandGradient)" />
+            <path d="M13 10.5v11l9-5.5-9-5.5z" fill="#fff" />
+          </svg>
+        </span>
+        <div>
+          <h1>WeiWatch</h1>
+          <p class="muted">Watch together, in sync.</p>
+        </div>
+      </div>
+
+      <form id="login-form" class="auth-form" autocomplete="on">
+        <label class="field">
+          <span class="field-label">Username</span>
+          <input
+            id="username"
+            class="input"
+            name="username"
+            type="text"
+            autocomplete="username"
+            spellcheck="false"
+            required
+            autofocus
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input
+            id="password"
+            class="input"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+        </label>
+        <p class="form-error" id="login-error" hidden></p>
+        <button class="btn btn-primary btn-block" id="login-button" type="submit">Sign in</button>
+      </form>
+
+      <p class="auth-foot muted">
+        Access is limited to the accounts listed in <code>credentials.json</code>.
+      </p>
+    </main>
+    <script src="/js/login.js"></script>
+  </body>
+</html>

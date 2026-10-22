@@ -1,0 +1,27 @@
+{
+  "name": "weiwatch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted watch party: a host-controlled shared browser with chat.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "hash": "node server/hash-password.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "watch-party",
+    "shared-browser",
+    "socket.io",
+    "self-hosted"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}
